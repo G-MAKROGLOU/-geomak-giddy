@@ -162,4 +162,4 @@ Finally, support for the option to re-deploy a past build will be added to make 
 
 ### Full project source code can be found [here]
 
-[here]: https://github.com/G-MAKROGLOU/@geomak/giddy
+[here]: https://github.com/G-MAKROGLOU/-geomak-giddy
