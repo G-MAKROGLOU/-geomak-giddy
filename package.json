@@ -1,0 +1,21 @@
+{
+  "name": "@geomak/giddy",
+  "version": "1.0.2",
+  "preferGlobal": true,
+  "bin": "./bin/giddy.js",
+  "description": "",
+  "main": "/bin/giddy.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\"",
+    "start": "node bin/giddy.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^8.1.0",
+    "figlet": "^1.5.2",
+    "uuid": "^8.3.2"
+  }
+}
