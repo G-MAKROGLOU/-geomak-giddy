@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "basic-ftp": "^4.6.6",
     "chalk": "^4.1.2",
     "commander": "^8.1.0",
     "figlet": "^1.5.2",
