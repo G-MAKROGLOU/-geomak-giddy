@@ -1,21 +1,112 @@
 const {error_message, success_message, normal_message} = require('../utils/message_types')
 const {extract_desktop_path, extract_scaffold_folder_name, extract_copy_command} = require('../utils/helpers')
-const {
-    rc_level1, rc_level2, rc_level3, rc_level4, rc_level5, 
-    rc_level1_1, rc_level1_2, rc_level1_3, rc_level1_4,  
-    nd_level1, nd_level2, nd_level3, nd_level4, nd_level5, 
+const {se_level1, se_level2, se_level3, se_level4, se_level5} = require('../utils/pipeline_errors')
 
-} = require('../utils/pipeline_errors')
+const {reset_repo} = require('../utils/error_promises')
 
-const {reset_repo, delete_folder} = require('../utils/error_promises')
-
-const os = require('os')
 const {exec} = require('child_process')
 const pathMod = require('path')
-const {v4: uuidv4} = require('uuid')
 const ftp = require('basic-ftp')
-const fs = require("fs");
 
+/**
+ * This subroutine is common among node and react scaffolding pipelines.
+ * It performs basic authorization checks, app service checks and resource
+ * group checks
+ * @param operation_data
+ * @returns {Promise<unknown>}
+ */
+const common_initial_subroutine_for_scaffolds = async (operation_data, appType) => {
+    try{
+        normal_message("Authorizing GitHub account...")
+        let success_msg = await authorizeGit(operation_data.git_username, operation_data.git_password)
+        success_message(success_msg)
+        normal_message("Setting up GitHub account credentials...")
+        success_msg = await setupGit(operation_data.git_username)
+        success_message(success_msg)
+        normal_message("Logging in to Azure...")
+        success_msg = await loginToAzure()
+        success_message(success_msg)
+        normal_message(`Checking if resource group ${operation_data.resource_group_name} exists...`)
+        return await checkIfResourceGroupExists(operation_data.resource_group_name)
+    }catch(err){
+        await error_handler(err.message, operation_data, err.code, appType)
+    }
+}
+
+/**
+ * This subroutine was common between the branching if-else
+ * statement after the resource group check and so it was
+ * isolated in a separate reusable function
+ * @param operation_data
+ * @param exists
+ * @param appType
+ * @returns {Promise<void>}
+ */
+const node_subroutine_for_web_app = async (operation_data, exists, appType) => {
+   try {
+       normal_message("Creating App Service...")
+       let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists)
+       success_message(success_msg)
+       normal_message("Creating remote...")
+       let response = await createRemote(operation_data.git_username, operation_data.git_password, operation_data.app_name, exists)
+       let path = `${pathMod.normalize(`${extract_desktop_path()}/giddy_node`)}`
+       success_message("Remote created successfully...")
+       normal_message("Updating remote...")
+       success_msg = await initRepo(path, response.remote_url, operation_data.commit_message, exists)
+       success_message(success_msg)
+       normal_message("Installing node modules...")
+       success_msg = await installModules(path, exists)
+       success_message(success_msg)
+       normal_message("Retrieving deployment credentials...")
+       let deployment_credentials = await getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name, exists)
+       success_message("Deployment credentials retrieved successfully...")
+       normal_message("Deploying app...This may take a while...")
+       operation_data.ftp_host = deployment_credentials.ftp_host;
+       operation_data.ftp_username = deployment_credentials.ftp_username;
+       operation_data.ftp_password = deployment_credentials.ftp_password;
+       await universal_ftp_upload(operation_data, path, exists ? 'se_level4' : 'se_level5')
+   }catch(err){
+       await error_handler(err.message, operation_data, err.code, appType)
+   }
+}
+
+/**
+ * This subroutine was common between the branching if-else
+ * statement after the resource group check and so it was
+ * isolated in a separate reusable function
+ * @param operation_data
+ * @param exists
+ * @param appType
+ * @returns {Promise<void>}
+ */
+const react_subroutine_for_webapp = async (operation_data, exists, appType) => {
+    try{
+        normal_message("Creating App Service...")
+        let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists)
+        success_message(success_msg)
+        normal_message("Creating source code remote...")
+        let remote_url = await createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}`, exists)
+        success_message("Remote created successfully...")
+        normal_message("Starting build script...")
+        success_msg = await startReactBuild(exists)
+        success_message(success_msg)
+        normal_message("Updating remote...")
+        let sourcePath = pathMod.normalize(`${extract_desktop_path()}/giddy_react`)
+        success_msg = await initRepo(sourcePath, remote_url.remote_url, operation_data.commit_message, exists)
+        success_message(success_msg)
+        normal_message("Retrieving deployment credentials...")
+        let ftp_credentials = await getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name, exists)
+        success_message("Deployment credentials retrieved successfully...")
+        let deployPath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react/build`)}`
+        operation_data.ftp_host = ftp_credentials.ftp_host
+        operation_data.ftp_username = ftp_credentials.ftp_username
+        operation_data.ftp_password = ftp_credentials.ftp_password
+        normal_message("Deploying React app...")
+        await universal_ftp_upload(operation_data, deployPath, exists ? 'se_level4' : 'se_level5')
+    }catch(err){
+        await error_handler(err.message, operation_data, err.code, appType)
+    }
+}
 
 
 /**
@@ -24,119 +115,26 @@ const fs = require("fs");
  * reused for node.js deployment as well (e.g ftp-function etc.). The main difference between this function
  * and the react version of it, it that node does need build and it is uploaded along with the node_modules folder
  * @param operation_data
+ * @param appType
  */
- const start_scaffolded_node = operation_data => {
-    normal_message("Authorizing GitHub account...")
-    authorizeGit(operation_data.git_username, operation_data.git_password).then(msg => {
-        success_message(msg)
-        normal_message("Setting up GitHub account credentials...")
-        
-        setupGit(operation_data.git_username).then(msg => {
-            success_message(msg)
-            normal_message("Logging in to Azure...")
-            
-            loginToAzure().then(msg => {
-                success_message(msg)
-                normal_message(`Checking if resource group ${operation_data.resource_group_name} exists...`)
-                
-                checkIfResourceGroupExists(operation_data.resource_group_name).then(exists => {
-                    if(exists === 'true') {
-                        success_message(`Resource group ${operation_data.resource_group_name} was found...`)
-                        normal_message("Creating App Service...")
-                        
-                        createWebApp(operation_data.app_name, operation_data.resource_group_name).then(msg => {
-                                success_message(msg)
-                                normal_message("Creating remote...")
-                                
-                                createRemote(operation_data.git_username, operation_data.git_password, operation_data.app_name).then(res => {
-                                    success_message("Remote created successfully...")
-                                    normal_message("Updating remote...")
-                                    let remoteUrl = res.remote_url
-                                    let path = `${pathMod.normalize(`${extract_desktop_path()}/giddy_node`)}`  
-                                    
-                                    initRepo(path, remoteUrl, operation_data.commit_message).then(msg => {
-                                        success_message(msg)
-                                        normal_message("Installing node modules...")
-                                        
-                                        installModules(path).then(msg => {
-                                            success_message(msg)
-                                            normal_message("Retrieving deployment credentials...")
+ const start_scaffolded_node = async (operation_data, appType) => {
+     try {
+         let exists = await common_initial_subroutine_for_scaffolds(operation_data, appType)
+         if(exists){
+             success_message(`Resource group ${operation_data.resource_group_name} was found...`)
+             await node_subroutine_for_web_app(operation_data, true, appType)
+             return
+         }
+         success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
+         normal_message("Creating the resource group...")
+         let success_msg = await createResourceGroup(operation_data.resource_group_name, operation_data.location)
+         success_message(success_msg)
+         await node_subroutine_for_web_app(operation_data, false, appType)
 
-                                            getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name).then(async ftpCreds => {
-                                                success_message("Deployment credentials retrieved successfully...")
-                                                normal_message("Deploying app...This may take a while...")
-                                                operation_data.ftp_host = ftpCreds.ftp_host;
-                                                operation_data.ftp_username = ftpCreds.ftp_username;
-                                                operation_data.ftp_password = ftpCreds.ftp_password;
-                                                await universal_ftp_upload(operation_data, path, 'nd_level5')
-
-                                            }).catch(err => error_handler(`ERR => APP SERVICE DEPLOYMENT CREDENTIALS: ${err}`, operation_data, 'nd_level5'))
-                                            
-                                        }).catch(err => error_handler(`ERR => NODE MODULES INSTALLATION: ${err}`, operation_data, 'nd_level5'))
-
-                                    }).catch(err => error_handler(`ERR => NODE REMOTE UPDATE: ${err}`, operation_data, 'nd_level5'))
-
-                                }).catch(err => error_handler(`ERR => CREATE NODE REMOTE: ${err}`, operation_data, 'nd_level4'))
-                            
-                        }).catch(err => error_handler(`ERR => WEB APP CREATION: ${err}`, operation_data, 'nd_level1'))
-
-                    }else {
-                        success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
-                        normal_message("Creating the resource group...")
-                        
-                        createResourceGroup(operation_data.resource_group_name, operation_data.location).then(msg => {
-                            success_message(msg)
-                            normal_message("Creating App Service")
-                            
-                            createWebApp(operation_data.app_name, operation_data.resource_group_name).then(msg => {
-                                success_message(msg)
-                                normal_message("Creating remote...")
-                                
-                                createRemote(operation_data.git_username, operation_data.git_password, operation_data.app_name).then(res => {
-                                    success_message("Remote created successfully...")
-                                    normal_message("Updating remote...")
-                                    let remoteUrl = res.remote_url
-                                    let path = `${pathMod.normalize(`${extract_desktop_path()}/giddy_node`)}` 
-                                    
-                                    initRepo(path, remoteUrl, operation_data.commit_message).then(msg => {
-                                        success_message(msg)
-                                        normal_message("Installing node modules...")
-                                        
-                                        installModules(path).then(msg => {
-                                            success_message(msg)
-                                            normal_message("Retrieving deployment credentials...")
-                                            
-                                            getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name).then(async ftpCreds => {
-                                                success_message("Deployment credentials retrieved successfully...")
-                                                normal_message("Deploying app...This may take a while...")
-                                                operation_data.ftp_host = ftpCreds.ftp_host;
-                                                operation_data.ftp_username = ftpCreds.ftp_username;
-                                                operation_data.ftp_password = ftpCreds.ftp_password;
-                                                await universal_ftp_upload(operation_data, path, 'nd_level3')
-                                            
-                                            }).catch(err => error_handler(`ERR => APP SERVICE DEPLOYMENT CREDENTIALS: ${err}`, operation_data, 'nd_level3'))
-                                            
-                                        }).catch(err => error_handler(`ERR => NODE MODULES INSTALLATION: ${err}`, operation_data, 'nd_level3'))
-
-                                    }).catch(err => error_handler(`ERR => NODE REMOTE UPDATE: ${err}`, operation_data, 'nd_level3'))
-
-                                }).catch(err => error_handler(`ERR => CREATE NODE REMOTE: ${err}`, operation_data, 'nd_level2'))
-                            
-                            }).catch(err => error_handler(`ERR => WEB APP CREATION AFTER RES-GROUP CREATION: ${err}`, operation_data, 'nd_level2'))
-
-                        }).catch(err => error_handler(`ERR => RESOURCE GROUP CREATION: ${err}`, operation_data, 'nd_level1'))
-                    }
-
-                }).catch(err => error_handler(`ERR => RESOURCE GROUP CHECK: ${err}`, operation_data, 'nd_level1'))
-
-            }).catch(err => error_handler(`ERR => AZURE LOGIN: ${err}`, operation_data, 'nd_level1'))
-
-        }).catch(err => error_handler(`ERR => GIT ACCOUNT SETUP: ${err}`, operation_data, 'nd_level1'))
-
-    }).catch(err => error_handler(`ERR => GIT AUTHORIZATION: ${err}`, operation_data, 'nd_level1'))
+     }catch(err){
+         await error_handler(err.message, operation_data, err.code, appType)
+     }
 }
-
-
 
 
 /**
@@ -144,171 +142,24 @@ const fs = require("fs");
  * a lot and so it will be broken down to smaller functions that can probably be
  * reused for node.js deployment as well (e.g ftp-function etc.).
  * @param operation_data
+ * @param appType
  */
- const start_scaffolded_react = operation_data => {
-   
-    normal_message("Authorizing GitHub account...")
-     authorizeGit(operation_data.git_username, operation_data.git_password).then(msg => {
-         success_message(msg)
-         normal_message("Setting up GitHub account credentials...")
-         
-         setupGit(operation_data.git_username).then(msg => {
-             success_message(msg)
-             normal_message("Logging in to Azure...")
-             
-             loginToAzure().then(msg => {
-                 success_message(msg)
-                 normal_message(`Checking if resource group ${operation_data.resource_group_name} exists...`)
-
-                 checkIfResourceGroupExists(operation_data.resource_group_name).then(exists => {
-                     if(exists === 'true'){
-                        success_message(`Resource group ${operation_data.resource_group_name} was found...`)
-                        normal_message("Creating App Service...")
-
-                        createWebApp(operation_data.app_name, operation_data.resource_group_name).then(msg => {
-                            success_message(msg)
-                            normal_message("Creating source remote...")
-
-                            createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}-source`).then(res => {
-                                let sourceRemoteUrl = res.remote_url
-
-                                success_message("Source remote created successfully...")
-                                normal_message("Creating builds remote...")
-
-                                createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}-builds`).then(res => {
-                                    let buildsRemoteUrl = res.remote_url
-                                    success_message("Builds remote created successfully...")
-                                    normal_message("Creating build folder...")
-
-                                    makeBuildFolder().then(res => {
-                                        let destinationPath = res.newBuildFolderPath
-                                        success_message(res.msg)
-                                        normal_message("Creating build...")
-
-                                        startReactBuild().then(msg => {
-                                            success_message(msg)
-                                            normal_message("Copying build to builds folder...")
-                                            let sourcePath = pathMod.normalize(`${extract_desktop_path()}/giddy_react/build`)
-
-                                            copyBuildToNewPath(sourcePath, destinationPath).then(msg => {
-                                                success_message(msg)
-                                                normal_message("Updating remotes...")
-                                                let sourcePath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react`)}`
-                                                    
-                                                initRepo(sourcePath, sourceRemoteUrl,operation_data.commit_message).then(msg => {
-                                                    success_message(msg)
-                                                    let buildsPath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react_builds`)}`
-                                                        
-                                                    initRepo(buildsPath, buildsRemoteUrl, operation_data.commit_message).then(msg => {
-                                                        success_message(msg)
-                                                        normal_message("Retrieving deployment credentials...")
-                                                        getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name).then(async ftpCreds => {
-                                                            success_message("Deployment credentials retrieved successfully...")
-                                                            let deployPath = `${pathMod.normalize(`${destinationPath}/build`)}`
-                                                            operation_data.ftp_host = ftpCreds.ftp_host
-                                                            operation_data.ftp_username = ftpCreds.ftp_username
-                                                            operation_data.ftp_password = ftpCreds.ftp_password
-                                                            normal_message("Deploying React app...")
-                                                            await universal_ftp_upload(operation_data, deployPath, 'rc_level1_4')
-                                                        }).catch(err => error_handler(`ERR => REACT APP DEPLOY: ${err}`, operation_data, 'rc_level1_4'))
-                                                            
-                                                    }).catch(err => error_handler(`ERR => BUILDS REMOTE UPDATE: ${err}`, operation_data, 'rc_level1_4'))
-
-                                                }).catch(err => error_handler(`ERR => SOURCE REMOTE UPDATE: ${err}`, operation_data, 'rc_level1_4'))
-
-                                            }).catch(err => error_handler(`ERR => COPY BUILD TO NEW FOLDER: ${err}`, operation_data, 'rc_level1_4'))
-
-                                        }).catch(err => error_handler(`ERR => REACT BUILD: ${err}`, operation_data, 'rc_level1_4'))
-
-                                    }).catch(err => error_handler(`ERR => MAKE FOLDER BUILD ${err}`, operation_data, 'rc_level1_3'))
-
-                                }).catch(err => error_handler(`ERR => CREATE BUILDS REMOTE ${err}`, operation_data, 'rc_level1_2'))
-
-                            }).catch(err => error_handler(`ERR => CREATE SOURCE REMOTE ${err}`, operation_data, 'rc_level1_1'))
-
-                        }).catch(err => error_handler(`ERR => WEB APP CREATION WITHOUT RES-GROUP CREATION: ${err}`, operation_data, 'rc_level1'))
-
-                     }else{
-                        success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
-                        normal_message("Creating the resource group...")
-
-                        createResourceGroup(operation_data.resource_group_name, operation_data.location).then(msg => {
-                            success_message(msg)
-                            normal_message("Creating App Service...")
-                            
-                            createWebApp(operation_data.app_name, operation_data.resource_group_name).then(msg => {
-                                success_message(msg)
-                                normal_message("Creating source remote...")
-
-                                createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}-source`).then(res => {
-                                    let sourceRemoteUrl = res.remote_url
-                                    success_message("Source remote created successfully...")
-                                    normal_message("Creating builds remote...")
-
-                                    createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}-builds`).then(res => {
-                                        let buildsRemoteUrl = res.remote_url
-                                        success_message("Builds remote created successfully...")
-                                        normal_message("Creating build folder...")
-
-                                        makeBuildFolder().then(res => {
-                                            let destinationPath = res.newBuildFolderPath
-                                            success_message(res.msg)
-                                            normal_message("Creating build...")
-
-                                            startReactBuild().then(msg => {
-                                                success_message(msg)
-                                                normal_message("Copying build to builds folder...")
-                                                let sourcePath = pathMod.normalize(`${extract_desktop_path()}/giddy_react/build`)
-
-                                                copyBuildToNewPath(sourcePath, destinationPath).then(msg => {
-                                                    success_message(msg)
-                                                    normal_message("Updating remotes...")
-                                                    let sourcePath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react`)}`
-                                                    
-                                                    initRepo(sourcePath, sourceRemoteUrl,operation_data.commit_message).then(msg => {
-                                                        success_message(msg)
-                                                        let buildsPath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react_builds`)}`
-                                                        
-                                                        initRepo(buildsPath, buildsRemoteUrl, operation_data.commit_message).then(msg => {
-                                                            success_message(msg)
-                                                            normal_message("Retrieving deployment credentials...")
-                                                            
-                                                            getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name).then(async ftpCreds => {
-                                                                success_message("Deployment credentials retrieved successfully...")
-                                                                let deployPath = `${pathMod.normalize(`${destinationPath}/build`)}`
-                                                                operation_data.ftp_host = ftpCreds.ftp_host
-                                                                operation_data.ftp_username = ftpCreds.ftp_username
-                                                                operation_data.ftp_password = ftpCreds.ftp_password
-                                                                normal_message("Deploying React app...")
-                                                                await universal_ftp_upload(operation_data, deployPath, 'rc_level5')
-                                                            }).catch(err => error_handler(`ERR => REACT DEPLOYMENT CREDS: ${err}`, operation_data, 'rc_level5'))
-                                                            
-                                                        }).catch(err => error_handler(`ERR => BUILDS REMOTE UPDATE: ${err}`, operation_data, 'rc_level5'))
-
-                                                    }).catch(err => error_handler(`ERR => SOURCE REMOTE UPDATE: ${err}`, operation_data, 'rc_level5'))
-
-                                                }).catch(err => error_handler(`ERR => COPY BUILD TO NEW FOLDER: ${err}`, operation_data, 'rc_level5'))
-
-                                            }).catch(err => error_handler(`ERR => REACT BUILD: ${err}`, operation_data, 'rc_level4'))
-
-                                        }).catch(err => error_handler(`ERR => MAKE BUILD FOLDER: ${err}`, operation_data, 'rc_level4'))
-
-                                    }).catch(err => error_handler(`ERR => CREATE BUILDS REMOTE: ${err} `, operation_data, 'rc_level3'))
-
-                                }).catch(err => error_handler(`ERR =>  CREATE SOURCE REMOTE: ${err}`, operation_data, 'rc_level2'))
-
-                            }).catch(err => error_handler(`ERR => WEB APP CREATION AFTER RES-GROUP CREATION: ${err}`, operation_data, 'rc_level2'))
-
-                        }).catch(err => error_handler(`ERR => RESOURCE GROUP CREATION: ${err}`, operation_data, 'rc_level1'))
-                     }
-
-                 }).catch(err => error_handler(`ERR => RESOURCE GROUP CHECK: ${err}`, operation_data, 'rc_level1'))
-
-             }).catch(err => error_handler(`ERR => AZURE LOGIN: ${err}`, operation_data, 'rc_level1'))
-
-         }).catch(err => error_handler(`ERR => GIT ACCOUNT SETUP: ${err}`, operation_data, 'rc_level1'))
-
-     }).catch(err => error_handler(`ERR: GIT AUTHORIZATION: ${err}`, operation_data, 'rc_level1'))
+ const start_scaffolded_react = async (operation_data, appType) => {
+     try{
+         let exists = await common_initial_subroutine_for_scaffolds(operation_data, appType)
+         if(exists){
+             success_message(`Resource group ${operation_data.resource_group_name} was found...`)
+             await react_subroutine_for_webapp(operation_data, appType)
+             return
+         }
+         success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
+         normal_message("Creating the resource group...")
+         let success_msg = await createResourceGroup(operation_data.resource_group_name, operation_data.location)
+         success_message(success_msg)
+         await react_subroutine_for_webapp(operation_data, appType)
+     }catch(err){
+         await error_handler(err.message, operation_data, err.code, appType)
+     }
 }
 
 
@@ -320,14 +171,10 @@ const fs = require("fs");
  * @param data
  */
 const start_react = data => {
-    let copyCmd;
-    let newBuildFolderName = uuidv4()
     let azLoginCmd = `az login`
     let azFtpCredentialsCmd = `az webapp deployment list-publishing-profiles --name ${data.app_name} --resource-group ${data.resource_group_name} --query "[?contains(publishMethod, 'FTP')].[publishUrl,userName,userPWD]" --output json`
-    let gitCmd = `cd ${data.source_code_path} && git add . && git commit -m "${data.commit_message}" && git push ${data.source_remote_name} ${data.source_branch_name} && cd ${data.builds_path} && git add . && git commit -m "${data.commit_message}" && git push ${data.builds_remote_name} ${data.builds_branch_name}`
-    if(os.platform() === 'linux') copyCmd = `cp -R ${data.source_code_path}/build ${data.builds_path}/${newBuildFolderName}`
-    if(os.platform() === 'win32') copyCmd = `xcopy ${data.source_code_path}\\build ${data.builds_path}\\${newBuildFolderName}\\build /E/H`
-    let buildCmd = `cd ${data.source_code_path} && npm run build && cd ${data.builds_path} && mkdir ${newBuildFolderName} && cd ${pathMod.normalize(`${data.builds_path}/${newBuildFolderName}`)} && mkdir build && ${copyCmd}`
+    let gitCmd = `cd ${data.source_code_path} && git add . && git commit -m "${data.commit_message}" && git push ${data.remote_name} ${data.branch_name}`
+    let buildCmd = `cd ${data.source_code_path} && npm run build`
 
     success_message("Starting React deploy pipeline...")
     normal_message("Authorizing GitHub account...")
@@ -364,36 +211,24 @@ const start_react = data => {
                     }
                     success_message("Successfully created new build...")
                     normal_message("Updating repositories...")
-                    exec(gitCmd,async  (err) => {
+                    exec(gitCmd, async (err) => {
                         if(err){
-                            console.log(err)
                             error_message("Could not update repositories...Check your git credentials and try again...")
-                            
-                            reset_repo(data.source_code_path).then(msg => {
-                                success_message("Source code repository reset successfully...")
-                                normal_message("Resetting builds repository...")
-                                
-                                reset_repo(data.builds_path).then(msg => {
-                                    success_message("Builds repository reset successfully")
-                                    //here probably the build folder needs to be deleted as well
-                                    //but the current implementation does not fully support it.
-                                    //FIX: break down the commands so the copy of the build happens
-                                    //     later and commit/push errors can be caught  
-    
-                                }).catch(err => {
-                                    error_message(err)
-                                    normal_message("Check the documentation for resolution of conflicts tips...")   
-                                }).finally(() => process.exit(1))
-                            
-                            }).catch(err => {
+                            try{
+                                let reset_msg = await reset_repo(data.source_code_path);
+                                success_message(reset_msg)
+                            }catch(err){
                                 error_message(err)
-                                normal_message("Check the documentation for resolution of conflicts tips...")   
-                            }).finally(() => process.exit(1))
+                                normal_message("Check the documentation for resolution of conflicts tips...")
+                            }
+                            finally {
+                                process.exit(1)
+                            }
                             return
                         }
-                        success_message("Successfully updated repositories...")
+                        success_message("Successfully updated repository...")
                         normal_message("Deploying app...")
-                        let path = pathMod.normalize(`${data.builds_path}/${newBuildFolderName}/build`)
+                        let path = pathMod.normalize(`${data.source_code_path}/build`)
                         await universal_ftp_upload(data, path, 'none')
                     })
                 })
@@ -415,7 +250,7 @@ const start_react = data => {
 const start_node = data => {
     success_message('Starting Node.js deploy pipeline...')
     let azLoginCmd = `az login`
-    let gitCmd = `cd ${data.source_code_path} && npm install && git add . && git commit -m "${data.commit_message}" && git push ${data.source_remote_name} ${data.source_branch_name}`
+    let gitCmd = `cd ${data.source_code_path} && npm install && git add . && git commit -m "${data.commit_message}" && git push ${data.remote_name} ${data.branch_name}`
 
     normal_message("Authorizing GitHub account...")
     authorizeGit(data.git_username, data.git_password)
@@ -445,6 +280,7 @@ const start_node = data => {
                 data.ftp_password = json[0][2]
                 exec(gitCmd, async (err) => {
                     if(err){
+                        console.log(err)
                         error_message("Failed to update GIT repository...Check your GIT credentials and try again...")
                         reset_repo(data.source_code_path).then(msg => {
                             success_message(msg)
@@ -459,7 +295,7 @@ const start_node = data => {
                     }
                     success_message("Repository updated successfully...")
                     normal_message("Deploying app...")
-                    await universal_ftp_upload(data, data.source_code_path, 'err-ftp-upload-node')
+                    await universal_ftp_upload(data, data.source_code_path, 'none')
                 })
             })
         })
@@ -473,20 +309,19 @@ const start_node = data => {
  * @param data
  * @param appType
  */
-const scaffold_app = (data, appType) => {
-    
-    createProjectFolder(appType).then(msg => {
-
-        success_message(msg)
+const scaffold_app = async (data, appType) => {
+    try {
+        let create_project_msg = await createProjectFolder(appType)
+        success_message(create_project_msg)
         normal_message("Adding source code...")
-        
-        copySourceCode(appType).then(msg => {
-            success_message(msg)
-            if(appType === 'react') start_scaffolded_react(data)
-            if(appType === 'node') start_scaffolded_node(data)
-        }).catch(err => error_handler(`ERR => ADD SOURCE CODE: ${err}`))
+        let copy_source_code_msg = await copySourceCode(appType)
+        success_message(copy_source_code_msg)
+        if(appType === 'react') await start_scaffolded_react(data, appType)
+        if(appType === 'node') await start_scaffolded_node(data, appType)
 
-    }).catch(err =>  error_handler(`ERR => CREATE PROJECT FOLDER: ${err}`))
+    }catch(err){
+       await error_handler(`ERR => APP SCAFFOLDING: `, data, err, appType)
+    }
 }
 
 
@@ -511,12 +346,12 @@ const universal_ftp_upload = async (operation_data, sourceCodePath, cleanupReaso
         await client.uploadFromDir(`${sourceCodePath}`);
         success_message('Web app deployed successfully...!')
         success_message(`You can check the app at https://${operation_data.app_name}.azurewebsites.net`)
-        client.close()
     }catch(err){
-        console.log(err.message)
         error_message("Deployment failed. Cleaning up resources....")
+        await cleanup(cleanupReason, operation_data, '')
+    }
+    finally {
         client.close()
-        cleanup(cleanupReason)
     }
 }
 
@@ -525,60 +360,44 @@ const universal_ftp_upload = async (operation_data, sourceCodePath, cleanupReaso
  * the necessary cleanup after errors. Each error is flagged with 
  * a severity level that represents the operations that need to be
  * performed. Below is the decoding of reasons.
- * REASONS:
- * -> REACT:
- * rc_level1: del-react-src (delete source code folder)
- * rc_level2: del-react-src-and-res-gr (level1 + delete resource group)
- * rc_level3: del-react-src-res-gr-and-src-rem (level1 + level2 + delete source remote)
- * rc_level4: del-react-src-res-gr-and-rems (level1 + level2 + delete source remote)
- * rc_level5: del-react-all (level1 + level2 + level3 + level4 + delete builds folder)
- * rc_level1_1: del-react-src-app (level1 + delete app service)
- * rc_level1_2: del-react-src-app-src-rem (level1 + level1_1 + delete source remote)
- * rc_level1_3: del-react-src-app-rems (level1 + level1_1 + level1_2 + delete builds remote)
- * rc_level1_4: del-react-src-app-rems-bui (level1 + level1_1 + level1_2 + level1_3 + level1_4 + delete builds folder)
- * 
- * -> NODE:
- * nd_level1: del-node-src (delete source code)
- * nd_level2: del-node-src-res-gr (level1 + delete resource group)
- * nd_level3: del-node-all (leve1 + level2 + delete remote)
- * nd_level4: del-node-src-app (level1 + delete app service)
- * nd_level5: del-node-src-app-rem (level1 + level4 + delete remote)
- * 
- * 
+ *
+ * se_level1 => delete folder
+ * se_level2 => delete folder & app
+ * se_level3 => delete folder & resource group
+ * se_level4 => delete folder, app & remote
+ * se_level5 => delete folder, resource group and remote
+ * none => process.exit(1)
+ *
  * @param reason error severity to take the corresponding action
  * @param operation_data data from giddy-config.json
+ * @param appType
  */
-const cleanup = (reason, operation_data) => {
-    // REACT
-    if(reason === 'rc_level1') rc_level1()
+const cleanup = async (reason, operation_data, appType) => {
+   try{
 
-    if(reason === 'rc_level2') rc_level2(operation_data)
+       if(reason === 'none') process.exit(0)
 
-    if(reason === 'rc_level3') rc_level3(operation_data)
+       if(reason === 'se_level1') {
+           let path = pathMod.normalize(`${extract_desktop_path()}/desktop/giddy_${appType}`)
+           await se_level1(path)
+       }
+       if(reason === 'se_level2') {
+           await se_level2('', operation_data.app_name, operation_data.resource_group_name)
+       }
+       if(reason === 'se_level3') {
+           await se_level3('', operation_data.app_name, operation_data.resource_group_name)
+       }
+       if(reason === 'se_level4') {
+           await se_level4('',  operation_data.app_name, operation_data.resource_group_name, operation_data.git_username, operation_data.git_password)
+       }
+       if(reason === 'se_level5') {
+           await se_level5('',  operation_data.app_name, operation_data.resource_group_name, operation_data.git_username, operation_data.git_password)
+       }
+   }catch(err){
+       error_message(err)
+       process.exit(1)
+   }
 
-    if(reason === 'rc_level4') rc_level4(operation_data)
-
-    if(reason === 'rc_level5') rc_level5(operation_data)
-
-    if(reason === 'rc_level1_1') rc_level1_1()
-
-    if(reason === 'rc_level1_2') rc_level1_2()
-
-    if(reason === 'rc_level1_3') rc_level1_3()
-
-    if(reason === 'rc_level1_4') rc_level1_4()
-
-
-    // NODE
-    if(reason === 'nd_level1') nd_level1(operation_data)
-    
-    if(reason === 'nd_level2') nd_level2()
-
-    if(reason === 'nd_level3') nd_level3()
-
-    if(reason === 'nd_level4') nd_level4()
-
-    if(reason === 'nd_level5') nd_level5()
 }
 
 
@@ -586,11 +405,12 @@ const cleanup = (reason, operation_data) => {
  * The promise error handler
  * @param {*} err 
  * @param {*} config 
- * @param {*} cleanup_reason 
+ * @param {*} cleanup_reason
+ * @param {*} appType
  */
-const error_handler = (err, config, cleanup_reason) => {
+const error_handler = async (err, config, cleanup_reason, appType) => {
     error_message(err)
-    cleanup(cleanup_reason, config)
+    await cleanup(cleanup_reason, config, appType)
 }
 
 
@@ -621,7 +441,7 @@ const copySourceCode = (appType) => {
     let copyCommand = extract_copy_command(appType)
     return new Promise((resolve, reject) => {
         exec(copyCommand, (err) => {
-            if(err) reject("'Could not copy source code...Removing folder and exiting...'")
+            if(err) reject("pr_level1")
             resolve("Source code added successfully. You can now open your project in your IDE...")
         })
     })
@@ -637,7 +457,11 @@ const authorizeGit = (username, password) => {
     let authorizeCmd = `curl -i -u ${username}:${password} https://api.github.com/users/${username}`
     return new Promise((resolve, reject) => {
        exec(authorizeCmd, (err) => {
-        if(err) reject("Could not confirm GitHub authorization...Check your credentials and try again...")
+        if(err)
+            reject({
+                message: "ERR => GIT AUTHORIZATION: Could not confirm GitHub authorization...Check your credentials and try again...",
+                code: 'se_level1'
+            })
         resolve("Sucessfully authorized GitHub account...")
        })
     })
@@ -652,7 +476,10 @@ const setupGit = name => {
     let gitCmd = `git config --global user.name ${name}`
     return new Promise((resolve, reject) => {
         exec(gitCmd, (err) => {
-            if(err) reject("Failed to setup your GitHub account...Check your GitHub credentials and try again...")
+            if(err) reject({
+                message: "ERR => GIT ACCOUNT SETUP: Failed to setup your GitHub account...Check your GitHub credentials and try again...",
+                code: 'se_level1'
+            })
             resolve("Git account set successfully...")
         })
     })
@@ -666,7 +493,10 @@ const loginToAzure = () => {
     let loginCmd = 'az login'
     return new Promise((resolve, reject) => {
         exec(loginCmd, (err) => {
-            if(err) reject("Failed to login to Azure...Check your Azure credentials and try again...")
+            if(err) reject({
+                message: "ERR => AZURE LOGIN: Failed to login to Azure...Check your Azure credentials and try again...",
+                code: 'se_level1'
+            })
             resolve("Successfully logged in to Azure...")
         })
     })
@@ -681,8 +511,12 @@ const checkIfResourceGroupExists = resource_group_name => {
     let checkResGroupCmd = `az group exists --name ${resource_group_name}`
     return new Promise((resolve, reject) => {
         exec(checkResGroupCmd, (err, stdout) => {
-            if(err) reject("Could not check if resource group exists or not...Check the resource group name in your giddy-config.json and try again...")
-            resolve(stdout.trim())
+            if(err) reject({
+                message: "ERR => RESOURCE GROUP CHECK: Could not check if resource group exists or not...Check the resource group name in your giddy-config.json and try again...",
+                code: 'se_level1'
+            })
+            if(stdout.trim() === 'true') resolve(true)
+            if(stdout.trim() === 'false') resolve(false)
         })
     })
 }
@@ -690,14 +524,17 @@ const checkIfResourceGroupExists = resource_group_name => {
 /**
  * Promise to create a new Resource Group
  * @param {*} resource_group_name 
- * @param {*} location 
+ * @param {*} location
  * @returns 
  */
 const createResourceGroup = (resource_group_name, location) => {
     let createResGroupCmd = `az group create --name ${resource_group_name} --location ${location}`
     return new Promise((resolve, reject) => {
         exec(createResGroupCmd, (err) => {
-            if(err) reject("Could not create resource group...Check the resource group name you gave and try again...")
+            if(err) reject({
+                message: "ERR => RESOURCE GROUP CREATION: Could not create resource group...Check the resource group name you gave and try again...",
+                code: 'se_level2'
+            })
             resolve("Resource group created sucessfully...")
         })
     })
@@ -706,14 +543,18 @@ const createResourceGroup = (resource_group_name, location) => {
 /**
  * Promise to create a new App Service
  * @param {*} app_name 
- * @param {*} resource_group_name 
+ * @param {*} resource_group_name
+ * @param {*} exists
  * @returns 
  */
-const createWebApp = (app_name, resource_group_name) => {
+const createWebApp = (app_name, resource_group_name, exists) => {
     let createWebAppCmd = `az webapp up --name ${app_name} --resource-group ${resource_group_name} --os-type Windows --runtime "node|14-lts" --sku FREE`
     return new Promise((resolve, reject) => {
         exec(createWebAppCmd, (err) => {
-            if(err) reject("Could not create App Service...Check details of your giddy-config.json and try again...")
+            if(err) reject({
+                message: "ERR => WEB APP CREATION: Could not create App Service...Check details of your giddy-config.json and try again...",
+                code: exists ? 'se_level2' : 'se_leve3'
+            })
             resolve("App Service created sucessfully...")
         })
     })
@@ -723,14 +564,18 @@ const createWebApp = (app_name, resource_group_name) => {
  * Promise to create a remote
  * @param {*} username 
  * @param {*} password 
- * @param {*} remote_name 
+ * @param {*} remote_name
+ * @param {*} exists
  * @returns 
  */
-const createRemote = (username, password, remote_name) => {
+const createRemote = (username, password, remote_name, exists) => {
     let createRemoteCmd = `curl -i -H "Authorization: token ${password}" -d "{\\"name\\":\\"${remote_name}\\", \\"auto_init\\":true,\\"private\\":true}" https://api.github.com/user/repos`
     return new Promise((resolve, reject) => {
         exec(createRemoteCmd, (err) => {
-            if(err) reject("Could not create remote...Maybe the repo already exists, or your GitHub password was incorrect. Check your giddy-config.json and try again...")
+            if(err) reject({
+                message: "ERR => CREATE NODE REMOTE: Could not create remote...Maybe the repo already exists, or your GitHub password was incorrect. Check your giddy-config.json and try again...",
+                code: exists ? 'se_level2' : 'se_level3'
+            })
             resolve({
                 "remote_url": `https://github.com/${username}/${remote_name}.git`
             })
@@ -742,14 +587,18 @@ const createRemote = (username, password, remote_name) => {
  * Promise to initialize the local repo, add a remote, and push to it
  * @param {*} repo_path 
  * @param {*} repo_remote_url 
- * @param {*} commit_message 
+ * @param {*} commit_message
+ * @param {*} exists
  * @returns 
  */
-const initRepo = (repo_path, repo_remote_url, commit_message) => {
+const initRepo = (repo_path, repo_remote_url, commit_message, exists) => {
     let initRepoCmd = `cd ${repo_path} && git init && git branch -m master main && git remote add origin ${repo_remote_url} && git add . && git commit -m "${commit_message}" && git push -f origin main`
     return new Promise((resolve, reject) => {
         exec(initRepoCmd, (err) => {
-            if(err) reject("Could not update remote...Avoid handling the project folder during giddy operations...")
+            if(err) reject({
+                message: "ERR => NODE REMOTE UPDATE: Could not update remote...Avoid handling the project folder during giddy operations...",
+                code: exists ? 'se_level4' : 'se_leve5'
+            })
             resolve("Remote updated successfully...")
         })
     })
@@ -757,14 +606,18 @@ const initRepo = (repo_path, repo_remote_url, commit_message) => {
 
 /**
  * Promise to install the node_modules (Only for Node.js)
- * @param {*} path 
+ * @param {*} path
+ * @param {*} exists
  * @returns 
  */
-const installModules = path => {
+const installModules = (path, exists) => {
     let installModulesCmd = `cd ${path} && npm install`
     return new Promise((resolve, reject) => {
         exec(installModulesCmd, (err) => {
-            if(err) reject("Could not install modules...Avoid processing of package.json during giddy operations...")
+            if(err) reject({
+                message: "ERR => NODE MODULES INSTALLATION: Could not install modules...Avoid processing of package.json during giddy operations...",
+                code: exists ? 'se_level4' : 'se_level5'
+            })
             resolve("Modules installed successfully...")
         })
     })
@@ -773,14 +626,18 @@ const installModules = path => {
 /**
  * Promise to get the FTP credentials of an App Service
  * @param {*} app_name 
- * @param {*} resource_group_name 
+ * @param {*} resource_group_name
+ * @param {*} exists
  * @returns 
  */
-const getDeploymentCredentials = (app_name, resource_group_name) => {
+const getDeploymentCredentials = (app_name, resource_group_name, exists) => {
     let ftpCredentials = `az webapp deployment list-publishing-profiles --name ${app_name} --resource-group ${resource_group_name} --query "[?contains(publishMethod, 'FTP')].[publishUrl,userName,userPWD]" --output json`
     return new Promise((resolve, reject) => {
         exec(ftpCredentials, (err, stdout) => {
-            if(err) reject("Could not retrieve app service deployment credentials...Check your giddy-config.json and try again...")
+            if(err) reject({
+                message: "ERR => APP SERVICE DEPLOYMENT CREDENTIALS: Could not retrieve app service deployment credentials...Check your giddy-config.json and try again...",
+                code: exists ? 'se_level4' : 'se_level5'
+            })
             let response = JSON.parse(stdout)
             resolve({
                 ftp_host: response[0][0],
@@ -791,59 +648,25 @@ const getDeploymentCredentials = (app_name, resource_group_name) => {
     })
 }
 
-/**
- * Promise to create the folder for the new build (Only for React)
- * @returns 
- */
-const makeBuildFolder = () => {
-    let newBuildFolderName = uuidv4()
-    let buildsFolder = `${pathMod.normalize(`${extract_desktop_path()}/giddy_react_builds`)}`
-    let createFolderCmd = `mkdir ${buildsFolder} && cd ${buildsFolder} && mkdir ${newBuildFolderName}`
-
-    return new Promise((resolve, reject) => {
-        exec(createFolderCmd, (err) => {
-            if(err) reject("Could not create builds folder...Maybe a giddy_react_builds folder already exists from a previous project?")
-            resolve({
-                "msg": "Project folder created successfully...",
-                "newBuildFolderPath": `${pathMod.normalize(`${extract_desktop_path()}/giddy_react_builds/${newBuildFolderName}`)}`
-            })
-        })
-    })
-}
 
 /**
  * Promise to start the build (Only for React)
+ * @param {*} exists
  * @returns 
  */
-const startReactBuild = () => {
+const startReactBuild = exists => {
     let projectPath = pathMod.normalize(`${extract_desktop_path()}/giddy_react`)
     let buildCmd = `cd ${projectPath} && npm install && npm run build`
     return new Promise((resolve, reject) => {
         exec(buildCmd, (err) => {
-            if(err) reject("Could not create build")
+            if(err) reject({
+                message: "ERR => REACT BUILD: Could not create build",
+                code: exists ? 'se_level2' : 'se_level3'
+            })
             resolve("Build created successfully...")
         })
     })
 }
-
-/**
- * Promise to copy the build to a new path (Only for React)
- * @param {*} source path of build
- * @param {*} destination destination path to be copies to
- * @returns 
- */
-const copyBuildToNewPath = (source, destination) => {
-    let copyCmd = `cp -R ${source} ${destination}`
-    if(os.platform() === 'win32') copyCmd = `xcopy ${source} ${destination} /E /H`
-    return new Promise((resolve, reject) => {
-        exec(copyCmd, err => {
-            if(err) reject("Could not copy build to builds folder...")
-            resolve("Build moved successfully...")
-        })
-    })
-}
-
-
 
 
 module.exports = {

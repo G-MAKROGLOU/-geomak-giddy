@@ -1,14 +1,19 @@
 # Version Updates (1.0.4)
 
-1) Windows compatibility is fixed.
-2) Added scaffolding option of React and Node.js projects that provide you with ready to develop projects
+1) Windows compatibility fixed.
+2) Added scaffolding option for React and Node.js projects that provide you with ready to develop projects
 3) Added cleanup handling in case of errors for <code>git</code>. (<code>git reset --soft HEAD~1</code>). See lower for conflict resolution tips
+4) Async-Await implementation of pipelines, leading to a much cleaner code base
+5) Tested on Ubuntu and  Garuda Dragonized (Arch Linux) distros.
+6) The cleanups are still in experimental phase except from the unstaging of a commit. 
+7) Shorter giddy-config.json templates and reduction to two instead of three
+8) The double repository pattern for React projects is no longer supported.
 
 
 # What is Giddy
-Giddy is an automated pipeline tool built with Node.js that makes the setup and deployment
+Giddy is an automated scaffolding and DevOps pipeline tool, built with Node.js that makes the setup and deployment
 of React and Node.js applications on Azure feel like a breeze. You simply provide Giddy with
-a <code>.json</code> config file and the rest are done for you automatically (except from Git credentials
+a <code>.json</code> config file, and the rest are done for you automatically (except from Git credentials
 insertion). However, forget about initializing projects, installing basic packages, building bundles, logging in, retrieving details,
 pushing to repositories, deploying etc.
 
@@ -84,20 +89,19 @@ giddy -a node -t init absolute/path/to/giddy-config.json
 
 1) Node.js
 2) Git
-3) azure-cli-tools ^2.0
+3) azure-cli ^2.0
 
 
 # JSON config templates
 
-There are three standard templates that <code>giddy</code> recognizes and this is mostly 
-to distinguish the deployment config between <code>node</code> and <code>react</code>.
-React requires a build compared to Node.js and so two repositories are created 
-(one for the source and one for the builds).
+There are two standard templates that <code>giddy</code> recognizes and this is mostly 
+to distinguish the deployment pipeline from the scaffolding pipeline.
+
 
 ### Scaffold giddy-config.json
 ```json
 {
-     "resource_group_name": "<a-name-for-the-resource-group-to-create>",
+     "resource_group_name": "<name-of-resource-group> (existing or new)",
      "location": "<location of the service according to Azure standards. e.g. westeurope>",
      "app_name": "<the-name-to-give-to-the-app>",
      "git_username": "<your-git-username>",
@@ -107,67 +111,32 @@ React requires a build compared to Node.js and so two repositories are created
 }
 
 ```
-The above template is the standard scaffold template that Giddy recognizes in order to
+The above template is the standard scaffolding template that Giddy recognizes in order to
 initialize a new project of the selected type, and perform the initial operations (repo creation,
-app service creation, resource group creation, repository update, and finally the intial deploy).
+app service creation, resource group creation, repository update, and finally the initial deploy).
 Once the pipeline is finished, you'll be prompted with a link to check your new application live.
 For Node.js apps, to check if the app is running after the pipeline, visit the 
-<code>/api/default/get</code> route.
+<code>/api/default/get</code> route. In React applications, the form has embedded validations and will
+not let you submit it empty, so just type a random username and password, and it will let you in.
 
 
-### React deploy template
+### Deploy template
 ```json
 {
   "resource_group_name": "<the-resource-group-name-of-the-app>",
   "app_name": "<the-app-service-name>",
   "source_code_path": "absolute/path/to/source/code",
-  "builds_path": "absolute/path/to/builds/folder",
-  "source_remote_name": "<name-of-source-code-remote> defaults to origin",
-  "source_branch_name": "<name-of-source-code-branch> defaults to main",
-  "builds_remote_name": "<name-of-builds-remote> defaults to origin",
-  "builds_branch_name": "<name-of-builds-branch> defaults to main",
+  "remote_name": "<name-of-source-code-remote> defaults to origin",
+  "branch_name": "<name-of-source-code-branch> defaults to main",
   "commit_message": "v1.0.1",
   "git_username": "<your-git-username>",
   "git_password": "<your-github-access-token>"
 }
 ```
 The above template is the standard <code>giddy-config.json</code> template for the deployment
-of an existing React app on Azure. If your project isn't scaffolded with <code>giddy</code>
-make sure to create the repo structure required and retrieve the information needed from your
-Azure Portal and GitHub accounts.
+of an existing app on Azure. It works for projects that aren't scaffolded with <code>giddy</code>
+as well, as long as the information are correct
 
-### Node.js deploy template
-```json
-{
-  "resource_group_name": "<the-resource-group-name-of-the-app>",
-  "app_name": "<the-app-service-name>",
-  "source_code_path": "absolute/path/to/source/code",
-  "source_remote_name": "<name-of-source-code-remote> defaults to origin",
-  "source_branch_name": "<name-of-source-code-branch> defaults to main",
-  "commit_message": "v1.0.1",
-  "git_username": "<your-git-username>",
-  "git_password": "<your-github-access-token>"
-}
-```
-The difference this template has, is that only one source code path, and one repository
-is required because Node.js doesn't require a built. However, in case your React projects are
-not created with <code>giddy</code>, you can point this template to your react built with the 
-credentials of a React App Service and achieve the same results (build is created by you).
-
-# Why two repositories for React?
-
-In order to do provide easier versioning and be able to revert to previous deployments,
-Giddy does two things:
-1) It builds the project, and then moves the build folder to a separate
-   folder with all the previous builds.
-
-2) It commits both the source code, and the build with the same comment,
-   so it is easier to revert to a previous build by doing a proper versioning.
-
-That way you always have your source code separate from your builds,
-and you can perform operations on both repositories.
-E.g. Retrieve an older build to redeploy,
-retrieve an older source to work with etc.
 
 
 # Usage guide from scratch
@@ -187,15 +156,11 @@ This applies to any React project, but for the sake of the tutorial let's go wit
 with <code>create-react-app</code>. Once scaffolding is finished, make sure that a local repository is initialized.
 If it isn't, initialize a local repository with <code>git init</code> and add <code>/node_modules</code> to it. The path to your project
 is what goes in the <code>"source_code_path"</code> property of your <code>giddy-config.json</code>
-    
-## Step 3: Create a folder for your builds and initialize it as a git repository
 
-Create a folder anywhere on your computer, navigate inside it, and initialize it as local repository.
-The path to this folder is what goes in the <code>"builds_path"</code> property of your <code>giddy-config.json</code>
 
-## Step 4: Create the remotes
+## Step 3: Create the remote
     
-Login to your GitHub account and create two repositories, one for the source code and one for the builds.
+Login to your GitHub account and create a repository, for your source code.
 Then create an authorization token to use as your password. From Aug 13, 2021 and onwards, GitHub uses 
 authentication tokens instead of account passwords. 
 Go to:
@@ -210,15 +175,15 @@ Finally, link each remote with each local repository by doing:
 git remote add <a remote name you want> <link to remote from your repo> 
 ```
 
-## Step 5: Create your giddy-config.json
+## Step 4: Create your giddy-config.json
 
 It's not the name giddy-config.json that matters most but the format and so, you can 
 name it however you want as long as it has a <code>.json</code> extension and the format is correct.
-Copy the template from above and replace the values of the properties with your matching ones.
+Copy the "deploy" template from above and replace the values of the properties with your matching ones.
 You can retrieve the remote and branch name by doing <code>git remote</code> and <code>git branch</code> 
 respectively inside a repository. The current branch will be marked with a <code>*</code>
 
-## Step 6: Run giddy
+## Step 5: Run giddy
 
 Finally, open a terminal window and type
 ```npm
@@ -232,14 +197,14 @@ giddy /home/<your username>/Desktop/giddy-config.json
 ```
 
 That's it! Save your <code>giddy-config.json</code> and continue developing your app.
-From now on all you need to do whenever you want to build, push and deploy your application, 
+From now on, all you need to do whenever you want to build, push and deploy your application, 
 is to change the commit message in your <code>giddy-config.json</code> and run <code>giddy</code>
 
-### The above six steps are equivalent to running <code>giddy -a react -t init path/to/giddy-config.json</code> .
+### The above five steps are equivalent to running <code>giddy -a react -t init path/to/giddy-config.json</code> .
 
 ### Apart from the obvious benefits of brevity, <code>giddy</code> also provides you with all the tools that you 
 
-### will need plus the boilerplate code for them
+### will need plus the boilerplate code for them. (packages, Context API, routes, styling...all the goodies to build upon)
 
 
 # Conflict resolution after <code>git reset --soft HEAD~1</code>
@@ -258,7 +223,7 @@ Fix conflicts manually and accept or abort changes
 Rerun giddy
 ```
 
-# React scaffold inclusion
+# React scaffold packages
 
 The React project includes:
 
@@ -270,6 +235,8 @@ The React project includes:
 5) Three routes ('/' (login), '/home' (home), '/todo' (demo of react-query))
 6) A 404 fallback page in case a route is not in the router
 7) Links to the documentation of each library
+
+# Node.js scaffold packages
 
 The Node.js application includes:
 
