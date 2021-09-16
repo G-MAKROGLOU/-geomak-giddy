@@ -1,10 +1,11 @@
 #! /usr/bin/env node
 
 const {program, Option} = require('commander')
-const {error_message} = require('../utils/message_types')
+const {error_message, success_message} = require('../utils/message_types')
 const fs = require('fs')
 const {print_logo} = require('../utils/print_home.js')
 const {start_react, scaffold_app, start_node} = require('../pipelines/pipelines.js')
+const { exec } = require('child_process')
 
 print_logo()
 
@@ -29,6 +30,7 @@ if(fs.existsSync(program.args[0])){
     process.exit(1)
 }
 
+
 const choose_variant = operation_data => {
     let {app, type} = program.opts()
 
@@ -36,5 +38,7 @@ const choose_variant = operation_data => {
     if(app === 'react' && type === 'init') scaffold_app(operation_data, 'react')
     if(app === 'node' && type === 'deploy') start_node(operation_data, app)
     if(app === 'node' && type === 'init') scaffold_app(operation_data, 'node')
+    
 }
+    
 

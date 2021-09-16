@@ -97,9 +97,6 @@ React requires a build compared to Node.js and so two repositories are created
 ### Scaffold giddy-config.json
 ```json
 {
-     "az_username": "<user@example.com>",
-     "az_password": "<your-super-strong-password>",
-     "az_subscription_id": "<the-subscription-id-you-have-access>",
      "resource_group_name": "<a-name-for-the-resource-group-to-create>",
      "location": "<location of the service according to Azure standards. e.g. westeurope>",
      "app_name": "<the-name-to-give-to-the-app>",
@@ -121,8 +118,6 @@ For Node.js apps, to check if the app is running after the pipeline, visit the
 ### React deploy template
 ```json
 {
-  "az_username": "<user@example.com>",
-  "az_password": "<your-super-strong-password>",
   "resource_group_name": "<the-resource-group-name-of-the-app>",
   "app_name": "<the-app-service-name>",
   "source_code_path": "absolute/path/to/source/code",
@@ -131,7 +126,9 @@ For Node.js apps, to check if the app is running after the pipeline, visit the
   "source_branch_name": "<name-of-source-code-branch> defaults to main",
   "builds_remote_name": "<name-of-builds-remote> defaults to origin",
   "builds_branch_name": "<name-of-builds-branch> defaults to main",
-  "commit_message": "v1.0.1"
+  "commit_message": "v1.0.1",
+  "git_username": "<your-git-username>",
+  "git_password": "<your-github-access-token>"
 }
 ```
 The above template is the standard <code>giddy-config.json</code> template for the deployment
@@ -142,14 +139,14 @@ Azure Portal and GitHub accounts.
 ### Node.js deploy template
 ```json
 {
-  "az_username": "<user@example.com>",
-  "az_password": "<your-super-strong-password>",
   "resource_group_name": "<the-resource-group-name-of-the-app>",
   "app_name": "<the-app-service-name>",
   "source_code_path": "absolute/path/to/source/code",
   "source_remote_name": "<name-of-source-code-remote> defaults to origin",
   "source_branch_name": "<name-of-source-code-branch> defaults to main",
-  "commit_message": "v1.0.1"
+  "commit_message": "v1.0.1",
+  "git_username": "<your-git-username>",
+  "git_password": "<your-github-access-token>"
 }
 ```
 The difference this template has, is that only one source code path, and one repository
