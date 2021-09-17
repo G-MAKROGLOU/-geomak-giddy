@@ -1,6 +1,6 @@
 {
   "name": "@geomak/giddy",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "preferGlobal": true,
   "bin": "./bin/giddy.js",
   "description": "",

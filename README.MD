@@ -193,7 +193,7 @@ For example, if you are on Ubuntu and your <code>giddy-config.json</code> is on 
 Desktop type: 
 
 ```npm
-giddy /home/<your username>/Desktop/giddy-config.json
+giddy -a react -t deploy /home/<your username>/Desktop/giddy-config.json
 ```
 
 That's it! Save your <code>giddy-config.json</code> and continue developing your app.
