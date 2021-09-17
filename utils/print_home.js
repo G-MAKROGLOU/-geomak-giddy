@@ -16,11 +16,11 @@ const print_logo = () => {
 
 
 const print_description  = () => {
-    console.log(chalk.yellow(`Giddy-Your GitHub Buddy
+    console.log(chalk.yellow(`@Giddy
 Author: George Makroglou
-Version: 1.0.1
-Description: Build/Push/Deploy pipeline for Azure App Services with React
-GitHub: https://github.com/G-MAKROGLOU/@geomak/giddy`))
+Version: 1.0.4
+Description: Scaffolding & Build/Push/Deploy pipelines for React & Node.js Azure App Services
+GitHub: https://github.com/G-MAKROGLOU/-geomak-giddy`))
     }
 
 module.exports = {print_logo, print_description}
