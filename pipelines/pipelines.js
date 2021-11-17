@@ -13,6 +13,7 @@ const ftp = require('basic-ftp')
  * It performs basic authorization checks, app service checks and resource
  * group checks
  * @param operation_data
+ * @param appType
  * @returns {Promise<unknown>}
  */
 const common_initial_subroutine_for_scaffolds = async (operation_data, appType) => {
@@ -39,13 +40,12 @@ const common_initial_subroutine_for_scaffolds = async (operation_data, appType) 
  * isolated in a separate reusable function
  * @param operation_data
  * @param exists
- * @param appType
  * @returns {Promise<void>}
  */
-const node_subroutine_for_web_app = async (operation_data, exists, appType) => {
+const node_subroutine_for_web_app = async (operation_data, exists) => {
    try {
        normal_message("Creating App Service...")
-       let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists)
+       let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
        success_message(success_msg)
        normal_message("Creating remote...")
        let response = await createRemote(operation_data.git_username, operation_data.git_password, operation_data.app_name, exists)
@@ -66,7 +66,7 @@ const node_subroutine_for_web_app = async (operation_data, exists, appType) => {
        operation_data.ftp_password = deployment_credentials.ftp_password;
        await universal_ftp_upload(operation_data, path, exists ? 'se_level4' : 'se_level5')
    }catch(err){
-       await error_handler(err.message, operation_data, err.code, appType)
+       await error_handler(err.message, operation_data, err.code, 'node')
    }
 }
 
@@ -76,13 +76,12 @@ const node_subroutine_for_web_app = async (operation_data, exists, appType) => {
  * isolated in a separate reusable function
  * @param operation_data
  * @param exists
- * @param appType
  * @returns {Promise<void>}
  */
-const react_subroutine_for_webapp = async (operation_data, exists, appType) => {
+const react_subroutine_for_webapp = async (operation_data, exists) => {
     try{
         normal_message("Creating App Service...")
-        let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists)
+        let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
         success_message(success_msg)
         normal_message("Creating source code remote...")
         let remote_url = await createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}`, exists)
@@ -104,7 +103,7 @@ const react_subroutine_for_webapp = async (operation_data, exists, appType) => {
         normal_message("Deploying React app...")
         await universal_ftp_upload(operation_data, deployPath, exists ? 'se_level4' : 'se_level5')
     }catch(err){
-        await error_handler(err.message, operation_data, err.code, appType)
+        await error_handler(err.message, operation_data, err.code, 'react')
     }
 }
 
@@ -115,24 +114,41 @@ const react_subroutine_for_webapp = async (operation_data, exists, appType) => {
  * reused for node.js deployment as well (e.g ftp-function etc.). The main difference between this function
  * and the react version of it, it that node does need build and it is uploaded along with the node_modules folder
  * @param operation_data
- * @param appType
  */
- const start_scaffolded_node = async (operation_data, appType) => {
+ const start_scaffolded_node = async operation_data => {
      try {
-         let exists = await common_initial_subroutine_for_scaffolds(operation_data, appType)
+         let exists = await common_initial_subroutine_for_scaffolds(operation_data, 'node')
          if(exists){
              success_message(`Resource group ${operation_data.resource_group_name} was found...`)
-             await node_subroutine_for_web_app(operation_data, true, appType)
+             normal_message("Checking if App Service Plan exists...")
+             let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+             if(aspListLength === 0){
+                 normal_message("The app service plan was not found...Creating app service plan")
+                 let aspMsg = await createAppServicePlan(operation_data)
+                 success_message(aspMsg)
+             }else{
+                 normal_message("App Service plan was found...")
+             }
+             await node_subroutine_for_web_app(operation_data, true,  'node')
              return
          }
          success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
          normal_message("Creating the resource group...")
          let success_msg = await createResourceGroup(operation_data.resource_group_name, operation_data.location)
          success_message(success_msg)
-         await node_subroutine_for_web_app(operation_data, false, appType)
+         normal_message("Checking if App Service Plan exists...")
+         let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+         if(aspListLength === 0){
+             normal_message("The app service plan was not found...Creating app service plan")
+             let aspMsg = await createAppServicePlan(operation_data)
+             success_message(aspMsg)
+         }else{
+             normal_message("App Service plan was found...")
+         }
+         await node_subroutine_for_web_app(operation_data, false)
 
      }catch(err){
-         await error_handler(err.message, operation_data, err.code, appType)
+         await error_handler(err.message, operation_data, err.code, 'node')
      }
 }
 
@@ -142,23 +158,41 @@ const react_subroutine_for_webapp = async (operation_data, exists, appType) => {
  * a lot and so it will be broken down to smaller functions that can probably be
  * reused for node.js deployment as well (e.g ftp-function etc.).
  * @param operation_data
- * @param appType
  */
- const start_scaffolded_react = async (operation_data, appType) => {
+ const start_scaffolded_react = async operation_data => {
+     let exists = true;
      try{
-         let exists = await common_initial_subroutine_for_scaffolds(operation_data, appType)
+         exists = await common_initial_subroutine_for_scaffolds(operation_data, 'react')
          if(exists){
              success_message(`Resource group ${operation_data.resource_group_name} was found...`)
-             await react_subroutine_for_webapp(operation_data, appType)
+             normal_message("Checking if App Service Plan exists...")
+             let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+             if(aspListLength === 0){
+                 normal_message("The app service plan was not found...Creating app service plan")
+                 let aspMsg = await createAppServicePlan(operation_data)
+                 success_message(aspMsg)
+             }else{
+                 normal_message("App Service plan was found...")
+             }
+             await react_subroutine_for_webapp(operation_data, 'react')
              return
          }
          success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
          normal_message("Creating the resource group...")
          let success_msg = await createResourceGroup(operation_data.resource_group_name, operation_data.location)
          success_message(success_msg)
-         await react_subroutine_for_webapp(operation_data, appType)
+         normal_message("Checking if App Service Plan exists...")
+         let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+         if(aspListLength === 0){
+             normal_message("The app service plan was not found...Creating app service plan")
+             let aspMsg = await createAppServicePlan(operation_data)
+             success_message(aspMsg)
+         }else{
+             normal_message("App Service plan was found...")
+         }
+         await react_subroutine_for_webapp(operation_data, 'react')
      }catch(err){
-         await error_handler(err.message, operation_data, err.code, appType)
+         await error_handler(err.message, operation_data, exists ? 'se_level4' : 'se_level3', 'react')
      }
 }
 
@@ -229,7 +263,7 @@ const start_react = data => {
                         success_message("Successfully updated repository...")
                         normal_message("Deploying app...")
                         let path = pathMod.normalize(`${data.source_code_path}/build`)
-                        await universal_ftp_upload(data, path, 'none')
+                        await universal_ftp_upload(data, path, 'none', 'react')
                     })
                 })
             })
@@ -245,7 +279,6 @@ const start_react = data => {
  * type of giddy-config.json than the deployment of a newly scaffolded app.  The main difference between this function
  * and the react version of it, it that node does need build and it is uploaded along with the node_modules folder
  * @param data
- * @param appType
  */
 const start_node = data => {
     success_message('Starting Node.js deploy pipeline...')
@@ -280,7 +313,6 @@ const start_node = data => {
                 data.ftp_password = json[0][2]
                 exec(gitCmd, async (err) => {
                     if(err){
-                        console.log(err)
                         error_message("Failed to update GIT repository...Check your GIT credentials and try again...")
                         reset_repo(data.source_code_path).then(msg => {
                             success_message(msg)
@@ -295,7 +327,7 @@ const start_node = data => {
                     }
                     success_message("Repository updated successfully...")
                     normal_message("Deploying app...")
-                    await universal_ftp_upload(data, data.source_code_path, 'none')
+                    await universal_ftp_upload(data, data.source_code_path, 'none', 'node')
                 })
             })
         })
@@ -316,8 +348,8 @@ const scaffold_app = async (data, appType) => {
         normal_message("Adding source code...")
         let copy_source_code_msg = await copySourceCode(appType)
         success_message(copy_source_code_msg)
-        if(appType === 'react') await start_scaffolded_react(data, appType)
-        if(appType === 'node') await start_scaffolded_node(data, appType)
+        if(appType === 'react') await start_scaffolded_react(data)
+        if(appType === 'node') await start_scaffolded_node(data)
 
     }catch(err){
        await error_handler(`ERR => APP SCAFFOLDING: `, data, err, appType)
@@ -331,9 +363,10 @@ const scaffold_app = async (data, appType) => {
  * @param operation_data The data from config.json file provided by the user
  * @param sourceCodePath The path to the folder containing the code to be uploaded
  * @param cleanupReason
+ * @param appType
  * @returns {Promise<void>} Instead of chaining a promise resolution, the errors are handled by a try-catch block
  */
-const universal_ftp_upload = async (operation_data, sourceCodePath, cleanupReason) => {
+const universal_ftp_upload = async (operation_data, sourceCodePath, cleanupReason, appType) => {
     const client = new ftp.Client()
     try{
         await client.access({
@@ -347,8 +380,8 @@ const universal_ftp_upload = async (operation_data, sourceCodePath, cleanupReaso
         success_message('Web app deployed successfully...!')
         success_message(`You can check the app at https://${operation_data.app_name}.azurewebsites.net`)
     }catch(err){
-        error_message("Deployment failed. Cleaning up resources....")
-        await cleanup(cleanupReason, operation_data, '')
+        let errorMessage = "Deployment failed. Cleaning up resources...."
+        await error_handler(errorMessage, operation_data, cleanupReason, appType);
     }
     finally {
         client.close()
@@ -457,7 +490,7 @@ const authorizeGit = (username, password) => {
                 message: "ERR => GIT AUTHORIZATION: Could not confirm GitHub authorization...Check your credentials and try again...",
                 code: 'se_level1'
             })
-        resolve("Sucessfully authorized GitHub account...")
+        resolve("Successfully authorized GitHub account...")
        })
     })
 }
@@ -530,7 +563,44 @@ const createResourceGroup = (resource_group_name, location) => {
                 message: "ERR => RESOURCE GROUP CREATION: Could not create resource group...Check the resource group name you gave and try again...",
                 code: 'se_level2'
             })
-            resolve("Resource group created sucessfully...")
+            resolve("Resource group created successfully...")
+        })
+    })
+}
+
+/**
+ * Promise to check if an app service plan exists
+ * @param app_service_plan
+ * @returns {Promise<unknown>}
+ */
+const checkIfAppServicePlanExists = app_service_plan => {
+    let aspExistsCmd = `az appservice plan list --query "[?name=='${app_service_plan}']"`
+    return new Promise((resolve, reject) => {
+        exec(aspExistsCmd, (err, stdout) => {
+            if(err) reject({
+                "message": "ERR => APP SERVICE PLAN EXISTS: Could not check if App Service Plan exists...",
+                "code": ""
+            })
+            let response = JSON.parse(stdout);
+            resolve(response.length)
+        })
+    })
+}
+
+/**
+ * Promise to create an App Service Plan
+ * @param config
+ * @returns {Promise<unknown>}
+ */
+const createAppServicePlan = config => {
+    let createAspCmd = `az appservice plan create --name ${config.app_service_plan} --resource-group ${config.resource_group_name} --location ${config.location} --sku FREE`
+    return new Promise((resolve, reject) => {
+        exec(createAspCmd, (err, stdout) => {
+            if(err) reject({
+                "message": "",
+                "code": ""
+            })
+            resolve("App Service Plan created successfully...")
         })
     })
 }
@@ -542,15 +612,15 @@ const createResourceGroup = (resource_group_name, location) => {
  * @param {*} exists
  * @returns 
  */
-const createWebApp = (app_name, resource_group_name, exists) => {
-    let createWebAppCmd = `az webapp up --name ${app_name} --resource-group ${resource_group_name} --os-type Windows --runtime "node|14-lts" --sku FREE`
+const createWebApp = (app_name, resource_group_name, exists, asp_name) => {
+    let createWebAppCmd = `az webapp create --name ${app_name} --resource-group ${resource_group_name} --plan ${asp_name} --runtime "node|14-lts"`
     return new Promise((resolve, reject) => {
         exec(createWebAppCmd, (err) => {
             if(err) reject({
                 message: "ERR => WEB APP CREATION: Could not create App Service...Check details of your giddy-config.json and try again...",
                 code: exists ? 'se_level2' : 'se_leve3'
             })
-            resolve("App Service created sucessfully...")
+            resolve("App Service created successfully...")
         })
     })
 }
@@ -591,7 +661,7 @@ const initRepo = (repo_path, repo_remote_url, commit_message, exists) => {
     return new Promise((resolve, reject) => {
         exec(initRepoCmd, (err) => {
             if(err) reject({
-                message: "ERR => NODE REMOTE UPDATE: Could not update remote...Avoid handling the project folder during giddy operations...",
+                message: "ERR => REMOTE UPDATE: Could not update remote...Avoid handling the project folder during giddy operations...",
                 code: exists ? 'se_level4' : 'se_leve5'
             })
             resolve("Remote updated successfully...")

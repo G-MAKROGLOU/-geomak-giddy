@@ -24,7 +24,7 @@ const fs = require('fs')
  */
 const delete_folder = path_to_folder => {
     return new Promise((resolve, reject) => {
-        fs.rm(path_to_folder, {recursive: true}, (err) => {
+        fs.rmdir(path_to_folder, {recursive: true}, (err) => {
             if(err) reject("Failed to delete folder...Perform the cleanup manually and try again")
             resolve("Folder deleted successfully...")
         })

@@ -1,3 +1,11 @@
+# Version Updates (1.0.6)
+1) Fixed scaffolding pipeline bugs for both React and Node apps. The previous pipeline
+    was using the wrong exec command to create an Azure App Service. 
+2) Added checks for App Service Plans. Default creation SKU is FREE and you can scale according to your needs.
+3) Fixed error handling promises.
+4) Updated giddy-template for project scaffolding. See the templates section for the updated version of init.json
+
+
 # Version Updates (1.0.4)
 
 1) Windows compatibility fixed.
@@ -63,25 +71,25 @@ the <code>deploy</code> option in the future.
 ### Deploy an existing React application on Azure
 
 ```git
-giddy -a react -t deploy absolute/path/to/giddy-config.json
+giddy -a react -t deploy absolute/path/to/deploy.json
 ```
 
 ### Deploy an existing Node application on Azure
 
 ```git
-giddy -a node -t deploy absolute/path/to/giddy-config.json
+giddy -a node -t deploy absolute/path/to/deploy.json
 ```
 
 ### Scaffold and deploy a new React application on Azure
 
 ```git
-giddy -a react -t init absolute/path/to/giddy-config.json
+giddy -a react -t init absolute/path/to/init.json
 ```
 
 ### Scaffold and deploy a new Node.js application on Azure
 
 ```git
-giddy -a node -t init absolute/path/to/giddy-config.json
+giddy -a node -t init absolute/path/to/init.json
 ```
 
 
@@ -98,10 +106,11 @@ There are two standard templates that <code>giddy</code> recognizes and this is 
 to distinguish the deployment pipeline from the scaffolding pipeline.
 
 
-### Scaffold giddy-config.json
+### Scaffold init.json
 ```json
 {
      "resource_group_name": "<name-of-resource-group> (existing or new)",
+     "app_service_plan": "<name-of-app-service-plan> (existing or new)",
      "location": "<location of the service according to Azure standards. e.g. westeurope>",
      "app_name": "<the-name-to-give-to-the-app>",
      "git_username": "<your-git-username>",
@@ -175,9 +184,9 @@ Finally, link each remote with each local repository by doing:
 git remote add <a remote name you want> <link to remote from your repo> 
 ```
 
-## Step 4: Create your giddy-config.json
+## Step 4: Create your deploy.json
 
-It's not the name giddy-config.json that matters most but the format and so, you can 
+It's not the name deploy.json that matters most but the format and so, you can 
 name it however you want as long as it has a <code>.json</code> extension and the format is correct.
 Copy the "deploy" template from above and replace the values of the properties with your matching ones.
 You can retrieve the remote and branch name by doing <code>git remote</code> and <code>git branch</code> 
@@ -207,7 +216,8 @@ is to change the commit message in your <code>giddy-config.json</code> and run <
 ### will need plus the boilerplate code for them. (packages, Context API, routes, styling...all the goodies to build upon)
 
 
-# Conflict resolution after <code>git reset --soft HEAD~1</code>
+### Conflict resolution after <code>git reset --soft HEAD~1</code>
+
 
     git add . 
 ####
@@ -251,6 +261,9 @@ The goal is to set you up as quickly as possible, with a project that has all bo
 ready, initialized repositories, and the Azure resources necessary together with your first deployment.
 That way you can focus only on the development and deploy again your app through giddy in a single command.
 
+####
+
+Both scaffolds contain a <code>web.config</code> file specifically for IIS. 
 
 ### Full project source code can be found [here]
 

@@ -52,7 +52,8 @@ export default function Login({history}){
             position: 'absolute',
             bottom: 10,
             right: 20,
-            color: '#424242'
+            color: '#424242',
+            zIndex: -2
         }
     }
 
