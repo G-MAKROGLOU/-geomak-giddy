@@ -4,14 +4,14 @@ const {program, Option} = require('commander')
 const {error_message} = require('../utils/message_types')
 const fs = require('fs')
 const {print_logo} = require('../utils/print_home.js')
-const {start_react, scaffold_app, start_node} = require('../pipelines/pipelines.js')
+const {start_react, scaffold_app, start_node, start_dotnet} = require('../pipelines/pipelines.js')
 
 
 
 print_logo()
 
 program
-    .addOption(new Option('-a, --app <app>', 'Type of application').choices(['react', 'node']))
+    .addOption(new Option('-a, --app <app>', 'Type of application').choices(['react', 'node', 'dotnet']))
     .addOption(new Option('-t, --type <type>', 'Type of operation').choices(['deploy', 'init']))
     .argument('file', 'The path to a JSON file containing all the necessary info. See https://www.npmjs.com/package/@geomak/giddy for examples')
 
@@ -39,6 +39,8 @@ const choose_variant = async operation_data => {
     if(app === 'react' && type === 'init') await scaffold_app(operation_data, 'react')
     if(app === 'node' && type === 'deploy') await start_node(operation_data, app)
     if(app === 'node' && type === 'init') await scaffold_app(operation_data, 'node')
+    if(app === 'dotnet' && type === 'init') await scaffold_app(operation_data, 'dotnet')
+    if(app === 'dotnet' && type === 'deploy') await start_dotnet(operation_data, 'dotnet')
 
 }
     

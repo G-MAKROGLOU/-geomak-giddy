@@ -18,7 +18,7 @@ const print_logo = () => {
 const print_description  = () => {
     console.log(chalk.yellow(`@Giddy
 Author: George Makroglou
-Version: 1.0.4
+Version: 1.0.7
 Description: Scaffolding & Build/Push/Deploy pipelines for React & Node.js Azure App Services
 GitHub: https://github.com/G-MAKROGLOU/-geomak-giddy`))
     }

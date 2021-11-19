@@ -24,6 +24,7 @@ const extract_scaffold_folder_name = appType => {
     let folderName;
     if(appType === 'react') folderName = 'giddy_react'
     if(appType === 'node') folderName = 'giddy_node'
+    if(appType === 'dotnet') folderName = 'giddy_dotnet'
     return folderName
 }
 

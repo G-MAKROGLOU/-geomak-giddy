@@ -45,7 +45,7 @@ const common_initial_subroutine_for_scaffolds = async (operation_data, appType) 
 const node_subroutine_for_web_app = async (operation_data, exists) => {
    try {
        normal_message("Creating App Service...")
-       let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
+       let success_msg = await createNodeWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
        success_message(success_msg)
        normal_message("Creating remote...")
        let response = await createRemote(operation_data.git_username, operation_data.git_password, operation_data.app_name, exists)
@@ -81,7 +81,7 @@ const node_subroutine_for_web_app = async (operation_data, exists) => {
 const react_subroutine_for_webapp = async (operation_data, exists) => {
     try{
         normal_message("Creating App Service...")
-        let success_msg = await createWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
+        let success_msg = await createNodeWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
         success_message(success_msg)
         normal_message("Creating source code remote...")
         let remote_url = await createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}`, exists)
@@ -107,6 +107,35 @@ const react_subroutine_for_webapp = async (operation_data, exists) => {
     }
 }
 
+
+const dotnet_subroutine_for_webapp = async (operation_data, exists) => {
+    try{
+        normal_message("Creating App Service...")
+        let success_msg = await createDotnetWebApp(operation_data.app_name, operation_data.resource_group_name, exists, operation_data.app_service_plan)
+        success_message(success_msg)
+        normal_message("Creating source code remote...")
+        let remote_url = await createRemote(operation_data.git_username, operation_data.git_password, `${operation_data.app_name}`, exists)
+        success_message("Remote created successfully...")
+        normal_message("Building Release binaries...")
+        success_msg = await startDotnetBuild(exists)
+        success_message(success_msg)
+        normal_message("Updating remote...")
+        let sourcePath = pathMod.normalize(`${extract_desktop_path()}/giddy_dotnet`)
+        success_msg = await initRepo(sourcePath, remote_url.remote_url, operation_data.commit_message, exists)
+        success_message(success_msg)
+        normal_message("Retrieving deployment credentials...")
+        let ftp_credentials = await getDeploymentCredentials(operation_data.app_name, operation_data.resource_group_name, exists)
+        success_message("Deployment credentials retrieved successfully...")
+        let deployPath = `${pathMod.normalize(`${extract_desktop_path()}/giddy_dotnet/bin/Release/netcoreapp3.1/publish`)}`
+        operation_data.ftp_host = ftp_credentials.ftp_host
+        operation_data.ftp_username = ftp_credentials.ftp_username
+        operation_data.ftp_password = ftp_credentials.ftp_password
+        normal_message("Deploying Dotnet app...")
+        await universal_ftp_upload(operation_data, deployPath, exists ? 'se_level4' : 'se_level5', 'dotnet')
+    }catch(err){
+        await error_handler(err.message, operation_data, err.code, 'react')
+    }
+}
 
 /**
  * Starts the deployment of a newly scaffolded application. This functions does
@@ -196,6 +225,47 @@ const react_subroutine_for_webapp = async (operation_data, exists) => {
      }
 }
 
+/**
+ * 
+ * @param operation_data
+ * 
+ */
+const start_scaffolded_dotnet = async operation_data => {
+     let exists = true;
+     try {
+         exists = await common_initial_subroutine_for_scaffolds(operation_data, 'dotnet');
+         if(exists){
+             success_message(`Resource group ${operation_data.resource_group_name} was found...`)
+             normal_message("Checking if App Service Plan exists...")
+             let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+             if(aspListLength === 0){
+                 normal_message("The app service plan was not found...Creating app service plan")
+                 let aspMsg = await createAppServicePlan(operation_data)
+                 success_message(aspMsg)
+             }else{
+                 normal_message("App Service plan was found...")
+             }
+             await dotnet_subroutine_for_webapp(operation_data, 'dotnet')
+             return
+         }
+         success_message(`Resource group ${operation_data.resource_group_name} was not found...`)
+         normal_message("Creating the resource group...")
+         let success_msg = await createResourceGroup(operation_data.resource_group_name, operation_data.location)
+         success_message(success_msg)
+         normal_message("Checking if App Service Plan exists...")
+         let aspListLength = await checkIfAppServicePlanExists(operation_data.app_service_plan)
+         if(aspListLength === 0){
+             normal_message("The app service plan was not found...Creating app service plan")
+             let aspMsg = await createAppServicePlan(operation_data)
+             success_message(aspMsg)
+         }else{
+             normal_message("App Service plan was found...")
+         }
+         await dotnet_subroutine_for_webapp(operation_data, 'dotnet')
+     }catch(err){
+         
+     }
+}
 
 
 /**
@@ -336,6 +406,93 @@ const start_node = data => {
 }
 
 
+const start_dotnet = data => {
+    let azLoginCmd = `az login`
+    let azFtpCredentialsCmd = `az webapp deployment list-publishing-profiles --name ${data.app_name} --resource-group ${data.resource_group_name} --query "[?contains(publishMethod, 'FTP')].[publishUrl,userName,userPWD]" --output json`
+    let gitCmd = `cd ${data.source_code_path} && git add . && git commit -m "${data.commit_message}" && git push ${data.remote_name} ${data.branch_name}`
+    let buildCmd = `cd ${data.source_code_path} && dotnet publish giddy_dotnet.sln -c Release`
+    let stopAppCmd = `az webapp stop --name ${data.app_name} --resource-group ${data.resource_group_name}`
+    let startAppCmd = `az webapp start --name ${data.app_name} --resource-group ${data.resource_group_name}`
+
+    success_message("Starting .NET deploy pipeline...")
+    normal_message("Authorizing GitHub account...")
+
+    authorizeGit(data.git_username, data.git_password)
+        .then(msg => {
+            success_message(msg)
+            normal_message("Logging in to Azure...")
+            exec(azLoginCmd, (err) => {
+                if(err){
+                    error_message("Could not login to Azure...Check your Azure credentials and try again...")
+                    process.exit(1)
+                    return
+                }
+                success_message("Successfully logged in to Azure...")
+                normal_message("Retrieving deployment credentials...")
+                exec(azFtpCredentialsCmd, (err, stdout) => {
+                    if(err){
+                        error_message("Could not retrieve deployment credentials...Check your app name details and try again...")
+                        process.exit(1)
+                        return
+                    }
+                    success_message("Successfully retrieved deployment credentials...")
+                    normal_message("Creating new build...")
+                    let json = JSON.parse(stdout)
+                    data.ftp_host = json[0][0]
+                    data.ftp_username = json[0][1]
+                    data.ftp_password = json[0][2]
+                    exec(buildCmd, (err) => {
+                        if(err){
+                            error_message("Could not create build...Check your folder paths and try again...")
+                            process.exit(1)
+                            return
+                        }
+                        success_message("Successfully created new build...")
+                        normal_message("Updating repositories...")
+                        exec(gitCmd, async (err) => {
+                            if(err){
+                                error_message("Could not update repositories...Check your git credentials and try again...")
+                                try{
+                                    let reset_msg = await reset_repo(data.source_code_path);
+                                    success_message(reset_msg)
+                                }catch(err){
+                                    error_message(err)
+                                    normal_message("Check the documentation for resolution of conflicts tips...")
+                                }
+                                finally {
+                                    process.exit(1)
+                                }
+                                return
+                            }
+                            success_message("Successfully updated repository...")
+                            normal_message("Stopping web app to start upload...")
+                            exec(stopAppCmd, async (err) => {
+                                if(err){
+                                    error_message("Could not stop the web app...Stop the app manually and try again...")
+                                    error_message("Don't forget to un-stage your commits before deploying again...")
+                                }
+                                success_message("Web app stopped successfully...")
+                                normal_message("Deploying app...")
+                                let path = pathMod.normalize(`${data.source_code_path}/bin/Release/netcoreapp3.1/publish`)
+                                await universal_ftp_upload(data, path, 'none')
+                                normal_message("Restarting web app...")
+                                exec(startAppCmd, (err) => {
+                                    if(err){
+                                        error_message("Could not restart web app. Restart it manually and try again...")
+                                    }
+                                    success_message("Web app restarted successfully...")
+                                })
+                            })
+
+
+                        })
+                    })
+                })
+            })
+
+        }).catch(err => error_message(err))
+}
+
 /**
  * Starts the scaffolding of an application irregardless of what type it is (react | node)
  * @param data
@@ -350,9 +507,10 @@ const scaffold_app = async (data, appType) => {
         success_message(copy_source_code_msg)
         if(appType === 'react') await start_scaffolded_react(data)
         if(appType === 'node') await start_scaffolded_node(data)
+        if(appType === 'dotnet') await start_scaffolded_dotnet(data)
 
     }catch(err){
-       await error_handler(`ERR => APP SCAFFOLDING: `, data, err, appType)
+        await error_handler(`ERR => APP SCAFFOLDING: `, data, err, appType)
     }
 }
 
@@ -597,8 +755,8 @@ const createAppServicePlan = config => {
     return new Promise((resolve, reject) => {
         exec(createAspCmd, (err, stdout) => {
             if(err) reject({
-                "message": "",
-                "code": ""
+                "message": "ERR => APP SERVICE CREATION: Could not create the app service plan",
+                "code": "se_level3"
             })
             resolve("App Service Plan created successfully...")
         })
@@ -612,10 +770,24 @@ const createAppServicePlan = config => {
  * @param {*} exists
  * @returns 
  */
-const createWebApp = (app_name, resource_group_name, exists, asp_name) => {
-    let createWebAppCmd = `az webapp create --name ${app_name} --resource-group ${resource_group_name} --plan ${asp_name} --runtime "node|14-lts"`
+const createNodeWebApp = (app_name, resource_group_name, exists, asp_name) => {
+    let createNodeWebAppCmd = `az webapp create --name ${app_name} --resource-group ${resource_group_name} --plan ${asp_name} --runtime "node|14-lts"`
     return new Promise((resolve, reject) => {
-        exec(createWebAppCmd, (err) => {
+        exec(createNodeWebAppCmd, (err) => {
+            if(err) reject({
+                message: "ERR => WEB APP CREATION: Could not create App Service...Check details of your giddy-config.json and try again...",
+                code: exists ? 'se_level2' : 'se_leve3'
+            })
+            resolve("App Service created successfully...")
+        })
+    })
+}
+
+
+const createDotnetWebApp = (app_name, resource_group_name, exists, asp_name) => {
+    let createDotnetWebAppCmd = `az webapp create --name ${app_name} --resource-group ${resource_group_name} --plan ${asp_name} --runtime "DOTNETCORE|3.1"`
+    return new Promise((resolve, reject) => {
+        exec(createDotnetWebAppCmd, (err) => {
             if(err) reject({
                 message: "ERR => WEB APP CREATION: Could not create App Service...Check details of your giddy-config.json and try again...",
                 code: exists ? 'se_level2' : 'se_leve3'
@@ -734,9 +906,25 @@ const startReactBuild = exists => {
 }
 
 
+const startDotnetBuild = exists => {
+    let projectPath = pathMod.normalize(`${extract_desktop_path()}/giddy_dotnet`)
+    let buildCmd = `cd ${projectPath} && dotnet publish giddy_dotnet.sln -c Release`
+    return new Promise((resolve, reject) => {
+        exec(buildCmd, (err) => {
+            if(err) reject({
+                "message": "ERR => DOTNET BUILD: Could not create Release build",
+                "code": exists ? 'se_level2': 'se_level3'
+            })
+            resolve("Release build created successfully...")
+        })
+    })
+}
+
+
 module.exports = {
     start_react,
     scaffold_app,
     start_node,
+    start_dotnet,
     start_scaffolded_react
 }
