@@ -1,3 +1,10 @@
+# Version Updates (1.0.7)
+1) Added scaffolding and deploy pipelines for .NET Core 3.1 Web API
+2) Check the scaffold description section to see what it is included in the .NET Core 3.1 Web API scaffold.
+3) Check the usage instructions section to see how to use the .NET scaffolding and deploy pipelines.
+4) Check the dependencies section to see what else you will need to run .NET pipelines.
+5) The <code>init.json</code> and <code>deploy.json</code> templates remain as they were
+
 # Version Updates (1.0.6)
 1) Fixed scaffolding pipeline bugs for both React and Node apps. The previous pipeline
     was using the wrong exec command to create an Azure App Service. 
@@ -80,6 +87,12 @@ giddy -a react -t deploy absolute/path/to/deploy.json
 giddy -a node -t deploy absolute/path/to/deploy.json
 ```
 
+### Deploy an existing .NET Core 3.1 Web API application on Azure
+
+```git
+giddy -a dotnet -t deploy absolute/path/to/deploy.json
+```
+
 ### Scaffold and deploy a new React application on Azure
 
 ```git
@@ -92,12 +105,18 @@ giddy -a react -t init absolute/path/to/init.json
 giddy -a node -t init absolute/path/to/init.json
 ```
 
+### Scaffold and deploy a new .NET Core 3.1 Web API application on Azure
+
+```git
+giddy -a dotnet -t init absolute/path/to/init.json
+```
 
 # What you will need - Package dependencies
 
 1) Node.js
 2) Git
 3) azure-cli ^2.0
+4) .NET Core 3.1 (comes with dotnet cli)
 
 
 # JSON config templates
@@ -232,6 +251,18 @@ Fix conflicts manually and accept or abort changes
 ```git
 Rerun giddy
 ```
+
+# .NET Core 3.1 Web API scaffold packages
+
+The .NET Core 3.1 Web API project includes:
+
+1) SwaggerUI in /swagger route
+2) JWT Authorization implementation for token and refresh token.
+3) Two controllers showcasing partial controller authorization and total controller authorization.
+4) 4 Total routes for Demo purpose check SwaggerUI in order to use them with an HTTP Client like Postman.
+5) BCrypt library with functions to hash and verify user passwords.
+6) Repository Pattern project structure
+
 
 # React scaffold packages
 
