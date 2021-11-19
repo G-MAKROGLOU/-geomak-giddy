@@ -48,7 +48,7 @@ Start by typing <code>giddy -h</code> to check the options.
 
 # Options
 The below option will set the type of project you want to set up and deploy or simply deploy.
-Current options are <code>react</code> and <code>node</code> 
+Current options are <code>react</code> , <code>node</code> and <code>dotnet</code> 
 ```git
 -a or --app with two choices react or node
 ```
