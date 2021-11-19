@@ -27,7 +27,7 @@
 
 # What is Giddy
 Giddy is an automated scaffolding and DevOps pipeline tool, built with Node.js that makes the setup and deployment
-of React and Node.js applications on Azure feel like a breeze. You simply provide Giddy with
+of React, Node.js and .NET Core 3.1 Web API applications on Azure feel like a breeze. You simply provide Giddy with
 a <code>.json</code> config file, and the rest are done for you automatically (except from Git credentials
 insertion). However, forget about initializing projects, installing basic packages, building bundles, logging in, retrieving details,
 pushing to repositories, deploying etc.
